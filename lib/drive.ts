@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 import { Readable } from "stream";
 
-let oauthClient: google.auth.OAuth2 | null = null;
+let oauthClient: any = null;
 
 function getOAuthClient() {
   if (oauthClient) return oauthClient;
