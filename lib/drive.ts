@@ -49,6 +49,29 @@ export function driveFileWebViewLink(fileId: string) {
   return `https://drive.google.com/file/d/${fileId}/view`;
 }
 
+export async function createJobFolder(jobCode: string) {
+  const drive = getDrive();
+  const parentFolderId = getDriveFolderId();
+
+  const res = await drive.files.create({
+    requestBody: {
+      name: jobCode,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [parentFolderId],
+    },
+    fields: "id,name",
+  });
+
+  if (!res.data.id) {
+    throw new Error("Google Drive did not return a folder ID.");
+  }
+
+  return {
+    id: res.data.id,
+    name: res.data.name ?? jobCode,
+  };
+}
+
 export async function uploadToDrive(params: {
   folderId: string;
   fileName: string;
@@ -78,7 +101,7 @@ export async function getDriveFolderInfo(folderId?: string) {
 
   const res = await drive.files.get({
     fileId: resolvedFolderId,
-    fields: "id,name,mimeType,driveId,parents",
+    fields: "id,name,mimeType,parents",
   });
 
   return res.data;

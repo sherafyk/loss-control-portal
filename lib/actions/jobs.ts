@@ -4,7 +4,11 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseServer } from "@/lib/supabase/server";
-import { getDriveFolderId, uploadToDrive, driveFileWebViewLink } from "@/lib/drive";
+import {
+  createJobFolder,
+  uploadToDrive,
+  driveFileWebViewLink
+} from "@/lib/drive";
 
 function yyyymmddFromDate(dateStr: string): string {
   const d = new Date(dateStr + "T00:00:00");
@@ -73,7 +77,7 @@ export async function createJobWithOpeningUpload(formData: FormData) {
   const jobCode = `${yyyymmdd}-${vesselCode}`;
 
   const file = formData.get("opening_file");
-  if (!(file instanceof File)) {
+  if (!(file instanceof File) || file.size === 0) {
     throw new Error("Opening Figures file is required.");
   }
 
@@ -89,13 +93,16 @@ export async function createJobWithOpeningUpload(formData: FormData) {
     redirect(`/surveyor/jobs/${encodeURIComponent(jobCode)}?error=job_exists`);
   }
 
-  const folderId = getDriveFolderId();
   const ext = safeExt(file.name);
   const seqNo = 1;
   const driveFileName = `${jobCode}-${seqNo}.${ext}`;
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const mimeType = file.type || "application/octet-stream";
+
+  // Create a dedicated Drive folder for this job first.
+  const createdFolder = await createJobFolder(jobCode);
+  const folderId = createdFolder.id;
 
   // Upload to Drive first; if this fails, we don't create a DB row.
   const driveRes = await uploadToDrive({
@@ -114,27 +121,28 @@ export async function createJobWithOpeningUpload(formData: FormData) {
   const driveLink =
     driveRes.webViewLink ?? driveFileWebViewLink(driveFileId);
 
-  const { data: job, error: jobErr } = await supabase
-    .from("jobs")
-    .insert({
-      job_code: jobCode,
-      delivery_date: parsed.delivery_date,
-      client_po: parsed.client_po ?? null,
-      vessel_name: parsed.vessel_name ?? null,
-      vessel_code: vesselCode,
-      barge_name: parsed.barge_name ?? null,
-      tankerman_name: parsed.tankerman_name ?? null,
-      tankerman_phone: parsed.tankerman_phone ?? null,
-      q1_nothing_to_report: !!parsed.q1_nothing,
-      q1_response: parsed.q1_response ?? null,
-      q2_nothing_to_report: !!parsed.q2_nothing,
-      q2_response: parsed.q2_response ?? null,
-      notes: parsed.notes ?? null,
-      created_by: user.id,
-      updated_by: user.id
-    })
-    .select("id,job_code")
-    .single();
+const { data: job, error: jobErr } = await supabase
+  .from("jobs")
+  .insert({
+    job_code: jobCode,
+    delivery_date: parsed.delivery_date,
+    client_po: parsed.client_po ?? null,
+    vessel_name: parsed.vessel_name ?? null,
+    vessel_code: vesselCode,
+    barge_name: parsed.barge_name ?? null,
+    tankerman_name: parsed.tankerman_name ?? null,
+    tankerman_phone: parsed.tankerman_phone ?? null,
+    q1_nothing_to_report: !!parsed.q1_nothing,
+    q1_response: parsed.q1_response ?? null,
+    q2_nothing_to_report: !!parsed.q2_nothing,
+    q2_response: parsed.q2_response ?? null,
+    notes: parsed.notes ?? null,
+    drive_folder_id: folderId,
+    created_by: user.id,
+    updated_by: user.id
+  })
+  .select("id,job_code")
+  .single();
 
   if (jobErr) {
     throw new Error(`Failed to create job: ${jobErr.message}`);
@@ -210,17 +218,17 @@ export async function uploadAdditionalJobFile(jobId: string, kind: string, formD
   const user = data.user;
   if (!user) redirect("/auth/login");
 
-  const file = formData.get("file");
-  if (!(file instanceof File)) {
-    throw new Error("File is required.");
-  }
+const file = formData.get("file");
+if (!(file instanceof File) || file.size === 0) {
+  throw new Error("File is required.");
+}
 
   // Fetch job_code for naming
-  const { data: job, error: jobErr } = await supabase
-    .from("jobs")
-    .select("job_code")
-    .eq("id", jobId)
-    .single();
+const { data: job, error: jobErr } = await supabase
+  .from("jobs")
+  .select("job_code, drive_folder_id")
+  .eq("id", jobId)
+  .single();
 
   if (jobErr) throw new Error(`Job not found: ${jobErr.message}`);
 
@@ -237,7 +245,10 @@ export async function uploadAdditionalJobFile(jobId: string, kind: string, formD
 
   const nextSeq = (maxRow?.sequence_no ?? 0) + 1;
 
-  const folderId = getDriveFolderId();
+  const folderId = job.drive_folder_id;
+  if (!folderId) {
+    throw new Error("This job is missing its Google Drive folder ID.");
+  }
   const ext = safeExt(file.name);
   const driveFileName = `${job.job_code}-${nextSeq}.${ext}`;
   const buffer = Buffer.from(await file.arrayBuffer());
