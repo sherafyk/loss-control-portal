@@ -1,26 +1,24 @@
 import { google } from "googleapis";
 import { Readable } from "stream";
 
-function getServiceAccountCredentials() {
-  const encoded = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64;
+let oauthClient: any = null;
 
-  if (!encoded) {
-    throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON_BASE64");
+function getOAuthClient() {
+  if (oauthClient) return oauthClient;
+
+  oauthClient = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
+
+  if (process.env.GOOGLE_REFRESH_TOKEN) {
+    oauthClient.setCredentials({
+      refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+    });
   }
 
-  const decoded = Buffer.from(encoded, "base64").toString("utf8");
-  return JSON.parse(decoded);
-}
-
-function getDrive() {
-  const credentials = getServiceAccountCredentials();
-
-  const auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ["https://www.googleapis.com/auth/drive"],
-  });
-
-  return google.drive({ version: "v3", auth });
+  return oauthClient;
 }
 
 export function getDriveFolderId() {
@@ -31,6 +29,15 @@ export function getDriveFolderId() {
   }
 
   return folderId;
+}
+
+function getDrive() {
+  const auth = getOAuthClient();
+
+  return google.drive({
+    version: "v3",
+    auth,
+  });
 }
 
 export async function uploadToDrive(params: {
@@ -50,21 +57,7 @@ export async function uploadToDrive(params: {
       mimeType: params.mimeType,
       body: Readable.from(params.buffer),
     },
-    fields: "id,name,webViewLink,driveId,parents",
-    supportsAllDrives: true,
-  });
-
-  return res.data;
-}
-
-export async function getDriveFolderInfo(folderId?: string) {
-  const drive = getDrive();
-  const resolvedFolderId = folderId ?? getDriveFolderId();
-
-  const res = await drive.files.get({
-    fileId: resolvedFolderId,
-    fields: "id,name,mimeType,driveId,parents",
-    supportsAllDrives: true,
+    fields: "id,name,webViewLink",
   });
 
   return res.data;
