@@ -10,7 +10,6 @@ export async function GET() {
       {
         ok: false,
         error: error?.message ?? "Unknown error",
-        details: error?.errors ?? null,
       },
       { status: 500 }
     );
