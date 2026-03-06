@@ -249,7 +249,15 @@ export async function uploadAdditionalJobFile(jobId: string, kind: string, formD
     mimeType,
     buffer
   });
-  const driveLink = driveRes.webViewLink ?? driveFileWebViewLink(driveRes.id);
+
+  const driveFileId = driveRes.id;
+
+  if (!driveFileId) {
+    throw new Error("Google Drive upload did not return a file ID.");
+  }
+
+  const driveLink =
+    driveRes.webViewLink ?? driveFileWebViewLink(driveFileId);
 
   const { error: insErr } = await supabase.from("job_files").insert({
     job_id: jobId,
