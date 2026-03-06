@@ -1,37 +1,36 @@
 import { google } from "googleapis";
 import { Readable } from "stream";
 
-type DriveUploadResult = {
-  id: string;
-  name: string;
-  webViewLink?: string;
-};
+function getServiceAccountCredentials() {
+  const encoded = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64;
 
-function getServiceAccountCredentials(): { client_email: string; private_key: string } {
-  const b64 = process.env.GOOGLE_SERVICE_ACCOUNT_JSON_BASE64;
-  if (!b64) {
-    throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 env var.");
-  }
-  const json = Buffer.from(b64, "base64").toString("utf8");
-  const creds = JSON.parse(json);
-
-  if (!creds.client_email || !creds.private_key) {
-    throw new Error("Service account JSON must include client_email and private_key.");
+  if (!encoded) {
+    throw new Error("Missing GOOGLE_SERVICE_ACCOUNT_JSON_BASE64");
   }
 
-  return { client_email: creds.client_email, private_key: creds.private_key };
+  const decoded = Buffer.from(encoded, "base64").toString("utf8");
+  return JSON.parse(decoded);
 }
 
 function getDrive() {
-  const { client_email, private_key } = getServiceAccountCredentials();
+  const credentials = getServiceAccountCredentials();
 
-  const auth = new google.auth.JWT({
-    email: client_email,
-    key: private_key,
-    scopes: ["https://www.googleapis.com/auth/drive"]
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ["https://www.googleapis.com/auth/drive"],
   });
 
   return google.drive({ version: "v3", auth });
+}
+
+export function getDriveFolderId() {
+  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+
+  if (!folderId) {
+    throw new Error("Missing GOOGLE_DRIVE_FOLDER_ID");
+  }
+
+  return folderId;
 }
 
 export async function uploadToDrive(params: {
@@ -39,41 +38,34 @@ export async function uploadToDrive(params: {
   fileName: string;
   mimeType: string;
   buffer: Buffer;
-}): Promise<DriveUploadResult> {
+}) {
   const drive = getDrive();
 
   const res = await drive.files.create({
     requestBody: {
       name: params.fileName,
-      parents: [params.folderId]
+      parents: [params.folderId],
     },
     media: {
       mimeType: params.mimeType,
-      body: Readable.from(params.buffer)
+      body: Readable.from(params.buffer),
     },
-    fields: "id,name,webViewLink"
+    fields: "id,name,webViewLink,driveId,parents",
+    supportsAllDrives: true,
   });
 
-  if (!res.data.id || !res.data.name) {
-    throw new Error("Google Drive upload failed (missing id/name).");
-  }
-
-  return {
-    id: res.data.id,
-    name: res.data.name,
-    webViewLink: res.data.webViewLink ?? undefined
-  };
+  return res.data;
 }
 
-export function getDriveFolderId(): string {
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
-  if (!folderId) {
-    throw new Error("Missing GOOGLE_DRIVE_FOLDER_ID env var.");
-  }
-  return folderId;
-}
+export async function getDriveFolderInfo(folderId?: string) {
+  const drive = getDrive();
+  const resolvedFolderId = folderId ?? getDriveFolderId();
 
-export function driveFileWebViewLink(fileId: string): string {
-  // Works for most Drive files as long as viewer has permissions.
-  return `https://drive.google.com/file/d/${fileId}/view`;
+  const res = await drive.files.get({
+    fileId: resolvedFolderId,
+    fields: "id,name,mimeType,driveId,parents",
+    supportsAllDrives: true,
+  });
+
+  return res.data;
 }
