@@ -105,7 +105,14 @@ export async function createJobWithOpeningUpload(formData: FormData) {
     buffer
   });
 
-  const driveLink = driveRes.webViewLink ?? driveFileWebViewLink(driveRes.id);
+  const driveFileId = driveRes.id;
+
+  if (!driveFileId) {
+   throw new Error("Google Drive upload did not return a file ID.");
+  }
+
+  const driveLink =
+    driveRes.webViewLink ?? driveFileWebViewLink(driveFileId);
 
   const { data: job, error: jobErr } = await supabase
     .from("jobs")
